@@ -1,8 +1,11 @@
 # BLPP_LLVM
 An Implementation of BLPP in LLVM
+
 References:
-Efficient Path Profiling (BLPP) paper
-Implementation in machsuif
+
+* Efficient Path Profiling (BLPP) paper
+
+* Implementation in machsuif
 
 Tested only for a simple factorial program
 
