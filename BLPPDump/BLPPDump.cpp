@@ -1,7 +1,7 @@
 #include "llvm/Transforms/BLPPDump.h"
 #include <iostream>
 
-BLPPDump::BLPPDump() : ModulePass(ID) {};
+BLPPDump::BLPPDump() : ModulePass(ID) {}
 
 bool BLPPDump::runOnModule(Module &m)
 {
