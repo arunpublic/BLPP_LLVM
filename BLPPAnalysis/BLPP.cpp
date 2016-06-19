@@ -17,8 +17,8 @@ BLPPRegistration("blpp", "instrument code for BL path profiling");
 */
 void BLPP::InitDFS() {
   BLPPNode *nodeCurP;
-  for (std::list<BLPPNode*>::iterator it = lNodes.begin();
-       it != lNodes.end(); it++) {
+  for (std::vector<BLPPNode*>::iterator it = svNodes.begin();
+       it != svNodes.end(); it++) {
     nodeCurP = *it;
     nodeCurP->isVisited = false;
   }
@@ -71,7 +71,7 @@ void BLPP::AssignEdgeVals(BLPPNode *bnCurrentP) {
     }
     bnCurrentP->siNumPaths = siNumPaths;
   }
-#if 0
+#if 1
   printf("Number of paths from %u to exit: %d\n", bnCurrentP->uiNodeID, 
          bnCurrentP->siNumPaths);
 #endif
@@ -275,28 +275,22 @@ void BLPP::AssociateAnnotations() {
   bnCurP = NULL;
 
   /* based on Figure 8 in PP paper */
+
   while (lWS.size() > 0) {
     bnCurP = lWS.back();
     lWS.pop_back();
-
     for (std::list<BLPPEdge*>::iterator 
            it = (bnCurP->lOutEdges).begin();
          it != (bnCurP->lOutEdges).end();
          it++) {
-
-      /* This is a conservative implementation of the register initialization
-         code in Figure 8, in that, it avoids initializing non-dummy chords,
-         even when it is possible. It also initializes pathsum register to
-         0 at the beginning of procedure, to compensate for this.
-      */
-
       beOutP = *it;
       if (beOutP->isChord) {
         /* This is a chord! Need to initialize now */
         if (NULL != beOutP->beDummyMatchP) {
           /* Move the initialization to matching dummy edge */
           (beOutP->beDummyMatchP)->siReset = beOutP->siIncrement;
-          beOutP->isInst = true;
+          (beOutP->beDummyMatchP)->isReset = true;
+          beOutP->isInst = true; /* Set to true, so we don't reconsider this edge */
           beOutP->siIncrement = 0;
           beOutP->atKind = INVALID;
         } else {
@@ -310,8 +304,18 @@ void BLPP::AssociateAnnotations() {
         /* Neither a chord, nor the only incoming edge of the successor!
            So, init explicitly.
         */
-        beOutP->isInst = true;
-        beOutP->atKind = PATH_SUM_INIT;
+        if (NULL != beOutP->beDummyMatchP)
+        {
+          /* Move the initialization to matching dummy edge */
+          (beOutP->beDummyMatchP)->siReset = beOutP->siIncrement;
+          (beOutP->beDummyMatchP)->isReset = true;
+          beOutP->isInst = true; /* Set to true, so we don't reconsider this edge */
+          beOutP->siIncrement = 0;
+          beOutP->atKind = INVALID;
+        } else {
+          beOutP->isInst = true;
+          beOutP->atKind = PATH_SUM_INIT;
+        }
       }
       
     }
@@ -336,19 +340,10 @@ void BLPP::AssociateAnnotations() {
          the taken counts of paths. A few of them also have
          to re-initialize the sum.
       */
-      if ((beInP->isChord) && (beInP->siReset != 0)) {
+      if (beInP->isChord) {
         beInP->isInst = true;
         beInP->atKind = PATH_SUM_READ;
-      } else if (beInP->isChord) {
-        beInP->isInst = true;
-        /* For each element in the list, need to add increment and
-           save annotations. Anyway I am going to reinitialize paths
-           for edges marked with PATH_SUM_READ, irrespective of
-           whether the initialization value is 0 or not.
-        */
-        beInP->isInst = true;
-        beInP->atKind = PATH_SUM_READ;
-      } else if (beInP->siReset != 0) {
+      } else if (beInP->isReset) {
         /* This is a tree edge, with a reinitialization value.
            This must be a dummy edge, or its reset would be 
            zero - any non-dummy edge does not have to reinitialize.
@@ -368,6 +363,7 @@ void BLPP::AssociateAnnotations() {
         beInP->isInst = true;
         beInP->atKind = PATH_SUM_READ;
         beInP->siIncrement = beInP->siReset = 0;
+        beInP->isReset = false;
       }
 
     }
@@ -378,10 +374,19 @@ void BLPP::AssociateAnnotations() {
   for (std::list<BLPPEdge*>::iterator it = lEdges.begin();
        it != lEdges.end(); it++) {
     beCurP = *it;
-    if ((false != beCurP->isChord) && (false == beCurP->isInst)) {
+    if ((false != beCurP->isChord) && (false == beCurP->isInst) &&
+      (0 != beCurP->siIncrement)) {
       beCurP->isInst = true;
       beCurP->atKind = PATH_SUM_INCR;
       beCurP->siReset = 0;
+    }
+    if (beCurP->isInst)
+    {
+      std::cout << "Edge from " << beCurP->nodeTailP->uiNodeID << " to " << beCurP->nodeHeadP->uiNodeID << ";InstKind: " << beCurP->atKind << ":" << beCurP->siIncrement << ":" <<  beCurP->siReset << ":";
+      if (beCurP->beDummyMatchP == NULL)
+        std::cout << "Not Dummy\n";
+      else
+        std::cout << "Dummy\n";
     }
   }
 
@@ -412,6 +417,7 @@ void BLPP::MarkBLPPAnnotations() {
   beBackP->siReset = 0;
   beBackP->isInst = false;
   beBackP->isChord = false;
+  beBackP->isReset = false;
   beBackP->siIncrement = 0;
   beBackP->atKind = INVALID;
   
@@ -447,7 +453,7 @@ BLPPPath BLPP::RegeneratePath(signed int siPathID) {
      So I'll initialize here.
   */
   if (NULL == bnTempPathPP) {
-    bnTempPathPP = new BLPPNode* [lNodes.size()];
+    bnTempPathPP = new BLPPNode* [svNodes.size()];
   }
 
   /* Start from the initial node */
@@ -524,81 +530,93 @@ BLPPEdge* BLPP::CreateBLPPEdge(BLPPNode *psTail, BLPPNode *psHead)
   psEdge->nodeHeadP = psHead;
   psEdge->nodeTailP = psTail;
   psEdge->siEdgeVal = psEdge->siIncrement = psEdge->siReset = 0;
-  psEdge->isChord = psEdge->isInst = false;
+  psEdge->isChord = psEdge->isInst = psEdge->isReset = false;
   psEdge->atKind = INVALID;
   psHead->lInEdges.push_back(psEdge);
   psTail->lOutEdges.push_back(psEdge);
   psEdge->beDummyMatchP = nullptr;
+  std::cout << "Edge from " << psTail->uiNodeID << " to " << psHead->uiNodeID
+    << "\n";
   return psEdge;
 }
 
-void BLPP::CreateBLPPGraph(Function &f)
-{
-  DominatorTreeAnalysis sDTA;
-  DominatorTree sDT = sDTA.run(f);
-  std::list<BLPPNode*> sRealExit;
-  uint32_t uiNodeID = 0;
 
-  for (Function::iterator it = f.begin(); it != f.end(); it++)
+
+void BLPP::CreateBLPPGraph(BasicBlock *psCurNode)
+{
+  /* Assign an id for this node */
+  std::cout << "uiNodeID:" << uiNodeID <<"\n";
+    psCurNode->dump();
+  BLPPNode *psBLPPNode = CreateBLPPNode(psCurNode, uiNodeID++);
+  mBBToBLPPNode[psCurNode] = psBLPPNode;
+  svNodes.push_back(psBLPPNode);
+
+  if (psCurNode == &(psCurFunc->getEntryBlock()))
   {
-    BasicBlock *psBB = static_cast<BasicBlock*>(it);
-    std::cout << "uiNodeID:" << uiNodeID <<"\n";
-    psBB->dump();
-    BLPPNode *psBLPPNode = CreateBLPPNode(psBB, uiNodeID++);
-    if (psBB == &f.getEntryBlock()) 
-      bnEntryP = psBLPPNode;
-    mBBToBLPPNode[psBB] = psBLPPNode;
-    lNodes.push_back(psBLPPNode);
+    bnEntryP = psBLPPNode;
+    bnExitP = CreateBLPPNode(nullptr, uiNodeID++);
+    svNodes.push_back(bnExitP);
   }
 
-  bnExitP = CreateBLPPNode(nullptr, uiNodeID);
-  lNodes.push_back(bnExitP);
-  
-
-  for (Function::iterator it = f.begin(); it != f.end(); it++)
+  TerminatorInst *psTermInst = psCurNode->getTerminator();
+  switch (psTermInst->getOpcode())
   {
-    BasicBlock *psBB = static_cast<BasicBlock*>(it);
-    const TerminatorInst *psTerminator = psBB->getTerminator();
-    for (uint32_t i = 0, uiNSucc = psTerminator->getNumSuccessors(); 
-      i < uiNSucc; i++)
+    case Instruction::Ret:
     {
-      BasicBlock *psSucc = psTerminator->getSuccessor(i);
-      if (sDT.dominates(psSucc, psBB))
-      {
-        /* Create dummy edges */
-        BLPPEdge *psFromEntry = CreateBLPPEdge(bnEntryP, mBBToBLPPNode[psSucc]);
-        BLPPEdge *psToExit = CreateBLPPEdge(mBBToBLPPNode[psBB], bnExitP);
-        psFromEntry->beDummyMatchP = psToExit;
-        psToExit->beDummyMatchP = psFromEntry;
-        lEdges.push_back(psFromEntry);
-        lEdges.push_back(psToExit);
-      }
-      else
-      {
-        BLPPEdge *psEdge = CreateBLPPEdge(mBBToBLPPNode[psBB], 
-          mBBToBLPPNode[psSucc]);
-        lEdges.push_back(psEdge);
-      }
-    }
-    if (0 == psTerminator->getNumSuccessors())
-    {
-      BLPPEdge *psEdge = CreateBLPPEdge(mBBToBLPPNode[psBB], bnExitP);
+      assert(0 == psTermInst->getNumSuccessors());
+      BLPPEdge *psEdge = CreateBLPPEdge(mBBToBLPPNode[psCurNode], bnExitP);
       lEdges.push_back(psEdge);
+      break;
+    }
+    case Instruction::Br:
+    {
+      for (uint32_t i = 0, uiNSucc = psTermInst->getNumSuccessors(); 
+        i < uiNSucc; i++)
+      {
+        BasicBlock *psSucc = psTermInst->getSuccessor(i);
+        if (mBBToBLPPNode.find(psSucc) == mBBToBLPPNode.end())
+          CreateBLPPGraph(psSucc);
+        if (sDT.dominates(psSucc, psCurNode))
+        {
+          /* Create dummy edges */
+          BLPPEdge *psFromEntry = CreateBLPPEdge(bnEntryP, mBBToBLPPNode[psSucc]);
+          BLPPEdge *psToExit = CreateBLPPEdge(mBBToBLPPNode[psCurNode], bnExitP);
+          psFromEntry->beDummyMatchP = psToExit;
+          psToExit->beDummyMatchP = psFromEntry;
+          lEdges.push_back(psFromEntry);
+          lEdges.push_back(psToExit);
+        }
+        else
+        {
+          BLPPEdge *psEdge = CreateBLPPEdge(mBBToBLPPNode[psCurNode], 
+            mBBToBLPPNode[psSucc]);
+          lEdges.push_back(psEdge);
+        }
+      }
+      break;
+    }
+    default:
+    {
+      assert(0 && "Unhandled terminator instruction");
     }
   }
 }
 
 
-bool BLPP::runOnFunction(Function &f)
+bool BLPP::runOnFunction(Function &func)
 {
-  CreateBLPPGraph(f);
+  psCurFunc = &func;
+  DominatorTreeAnalysis sDTA;
+  sDT = sDTA.run(func);
+  uiNodeID = 0;
+  CreateBLPPGraph(&(func.getEntryBlock()));
   MarkBLPPAnnotations();
   return false;
 }
 
 BLPP::~BLPP()
 {
-  for (std::list<BLPPNode*>::iterator it = lNodes.begin(); it != lNodes.end();
+  for (std::vector<BLPPNode*>::iterator it = svNodes.begin(); it != svNodes.end();
     it++)
   {
     delete *it;

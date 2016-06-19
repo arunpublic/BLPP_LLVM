@@ -7,6 +7,7 @@
    
 */
 #include <list>
+#include <vector>
 #include "llvm/Pass.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Dominators.h"
@@ -30,7 +31,7 @@ typedef struct {
 struct TagBLPPEdge {
   BLPPNode *nodeHeadP, *nodeTailP;
   signed int siEdgeVal, siIncrement, siReset;
-  bool isChord, isInst /* has this edge been already instrumented? */; 
+  bool isChord, isReset, isInst /* has this edge been already instrumented? */; 
   struct TagBLPPEdge* beDummyMatchP;
   AnnoteType atKind;
 } ;
@@ -47,8 +48,12 @@ typedef struct {
 class BLPP : public FunctionPass {
 
   BLPPNode **bnTempPathPP;
-  typedef std::map<BasicBlock*, BLPPNode*> MapBBToBLPPNode;
+  typedef std::map<const BasicBlock*, BLPPNode*> MapBBToBLPPNode;
   MapBBToBLPPNode mBBToBLPPNode;
+  DominatorTree sDT; //Dominator tree for the function
+  uint32_t uiNodeID;
+  Function *psCurFunc;
+  
 
   /* These are utility functions */
   void ComputeChordIncrements();
@@ -57,16 +62,16 @@ class BLPP : public FunctionPass {
               BLPPEdge *beP);
   signed int Dir(BLPPEdge *be1P, BLPPEdge *be2P);
   void AssociateAnnotations();
-  void CreateBLPPGraph(Function &f);
+  void CreateBLPPGraph(BasicBlock *psCurNode);
   BLPPNode* CreateBLPPNode(BasicBlock *psBB, uint32_t uiNodeID);
   BLPPEdge* CreateBLPPEdge(BLPPNode *psTail, BLPPNode *psHead);
 
  public:
-  std::list<BLPPNode*>lNodes;
+  std::vector<BLPPNode*>svNodes;
   std::list<BLPPEdge*>lEdges;
   BLPPNode *bnEntryP, *bnExitP;
 
-  BLPP() : FunctionPass(ID), bnTempPathPP(nullptr) {};
+  BLPP() : FunctionPass(ID), bnTempPathPP(nullptr), psCurFunc(nullptr) {};
   void InitDFS();
   void MarkBLPPAnnotations();
   void AssignEdgeVals(BLPPNode *bnCurrentP = nullptr);
