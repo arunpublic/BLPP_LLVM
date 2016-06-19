@@ -38,8 +38,8 @@ Tested only for a simple factorial program
 
 TODO - IMMEDIATE REQUIREMENTS:
 
-1) Generate unique path-ids for the same sequence of BB's (Current implementation uses llvm's iterators to order the successors of a BLPP graph node, while we want a deterministic order across different runs)
+1) Generate unique ids to functions (Current implementation uses llvm's iterators to examine functions and assign id's while we want a deterministic order)
 
-2) Generate unique ids to functions (Current implementation uses llvm's iterators to examine functions and assign id's while we want a deterministic order)
+2) Support other terminator instructions (particularly switch) - Currently, only cbr and br are supported
 
-3) Test and validate
+3) Add more tests and validate
